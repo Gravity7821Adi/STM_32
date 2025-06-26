@@ -21,8 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "string.h"
-#include "stdio.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -32,7 +31,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+//#define MASTER_BOARD
+#define I2C_ADDRESS        0x1D
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -41,24 +41,20 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-SPI_HandleTypeDef hspi1;
-
-UART_HandleTypeDef huart4;
+I2C_HandleTypeDef hi2c1;
 
 /* USER CODE BEGIN PV */
-	uint8_t txbuffer[2]; //address and value
-	uint8_t rx_x,rx_y,rx_z;// receive (store) value of x,y,z axis
-	char outstr[100];
-
+uint8_t ubKeyNumber = 0x0;
+uint8_t aTxBuffer[2];
+uint8_t aRxBuffer[2];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_SPI1_Init(void);
-static void MX_UART4_Init(void);
+static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
-
+void LED_Display(uint8_t LedStatus);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -95,89 +91,68 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_SPI1_Init();
-  MX_UART4_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-  //1.configure the slave only once
-
-  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, RESET);//CS pulled LOW
-
-  txbuffer[0]=0x20;	//address of CTRL_reg4
-  txbuffer[1]=0x17;	//value
-
-  //write operation ,MSB=0
-
-  HAL_SPI_Transmit(&hspi1, txbuffer, 2, 50);
-  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, SET);//CS pulled high
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
-  {
+  #ifdef MASTER_BOARD
+      while (1)
+      {
 
-	  //2. read the value of X-axis
+          if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_SET)
+              {
+                    HAL_Delay(50);//Debouncing Delay
+                    if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_SET)
+                        {
+                            if (ubKeyNumber == 0x4)
+                                  ubKeyNumber = 0x00;
+                            else
+                                {
+                                    LED_Display(++ubKeyNumber);
 
-	  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, RESET);//CS pulled low
+                                    /* Set the data to be transmitted */
+                                    aTxBuffer[0] = ubKeyNumber;
+                                    aTxBuffer[1] = 0xAA; //any value we can kept on here
 
-	  txbuffer[0]=0x29|0x80;//Address to be read
+                                    /*##-1- Start the transmission process #####################################*/
+                                    /* While the I2C in reception process, user can transmit data through
+                                    "aTxBuffer" buffer */
+                                    /* Timeout is set to 10S */
+                                    while(HAL_I2C_Master_Transmit(&hi2c1, (uint16_t)I2C_ADDRESS, (uint8_t*)aTxBuffer, 2,10000)!= HAL_OK)
+                                        {
+                                            /* Error_Handler() function is called when Timeout error occurs.
+                                           When Acknowledge failure occurs (Slave don't acknowledge it's address)
+                                           Master restarts communication */
+                                            if (HAL_I2C_GetError(&hi2c1) != HAL_I2C_ERROR_AF)
+                                                    Error_Handler();
 
-	  HAL_SPI_Transmit(&hspi1, txbuffer, 1, 50);//transmit the address to be read
-	  HAL_SPI_Receive(&hspi1, &rx_x, 1, 50);//receive and store in rx_x
-
-      sprintf((char*)outstr,"Value of x =%d\r\n",rx_x);
-      HAL_UART_Transmit(&huart4,(uint8_t*) &outstr, strlen(outstr),10);
-
-	  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, SET);
-
-	  //3.read the value of y axis
-
-	  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, RESET);//CS pulled low
-
-	  txbuffer[0]=0x2B|0x80;//Address to be read
-
-	  HAL_SPI_Transmit(&hspi1, txbuffer, 1, 50);//transmit the address to be read
-	  HAL_SPI_Receive(&hspi1, &rx_y, 1, 50);//receive and store in rx_y
-	  sprintf((char*)outstr,"Value of y =%d\r\n",rx_y);
-	  HAL_UART_Transmit(&huart4,(uint8_t*) &outstr, strlen(outstr),10);
-	  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, SET);
-
-
-	  //4.read the value of z axis0
-
-
-	  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, RESET);//CS pulled low
-
-	  txbuffer[0]=0x2D|0x80;//Address to be read
-
-	  HAL_SPI_Transmit(&hspi1, txbuffer, 1, 50);//transmit the address to be read
-	  HAL_SPI_Receive(&hspi1, &rx_z, 1, 50);//receive and store in rx_z
-
-	  sprintf((char*)outstr,"Value of z =%d\r\n",rx_z);
-	        HAL_UART_Transmit(&huart4,(uint8_t*) &outstr, strlen(outstr),10);
-
-
-	  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, SET);
-
-	  if(rx_x>10){
-		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12|GPIO_PIN_14, SET);
-	  }
-
-	  else if(rx_y>20){
-		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13|GPIO_PIN_15, SET);
-	  }
-
-	  else{
-		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15, RESET);
-	  }
-
-
+                                        }
+                                    HAL_Delay(100);//Delay just for better Tuning
+                                }
+                            }
+                 }
 
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-  }
+      }
+
+  #else
+      while(1)
+      {
+
+          /*##-2- Put I2C peripheral in reception process ############################*/
+            /* Timeout is set to 10S  */
+            if(HAL_I2C_Slave_Receive(&hi2c1, (uint8_t *)aRxBuffer, 2, 10000) == HAL_OK)
+                LED_Display(aRxBuffer[0]);
+            else
+                Error_Handler();    /* Transfer error in reception process */
+            //while (HAL_I2C_GetState(&hi2c1) != HAL_I2C_STATE_READY);
+      }
+  #endif /* MASTER_BOARD */
   /* USER CODE END 3 */
 }
 
@@ -223,73 +198,36 @@ void SystemClock_Config(void)
 }
 
 /**
-  * @brief SPI1 Initialization Function
+  * @brief I2C1 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_SPI1_Init(void)
+static void MX_I2C1_Init(void)
 {
 
-  /* USER CODE BEGIN SPI1_Init 0 */
+  /* USER CODE BEGIN I2C1_Init 0 */
 
-  /* USER CODE END SPI1_Init 0 */
+  /* USER CODE END I2C1_Init 0 */
 
-  /* USER CODE BEGIN SPI1_Init 1 */
+  /* USER CODE BEGIN I2C1_Init 1 */
 
-  /* USER CODE END SPI1_Init 1 */
-  /* SPI1 parameter configuration*/
-  hspi1.Instance = SPI1;
-  hspi1.Init.Mode = SPI_MODE_MASTER;
-  hspi1.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
-  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
-  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
-  hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
-  hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
-  hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
-  hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-  hspi1.Init.CRCPolynomial = 10;
-  if (HAL_SPI_Init(&hspi1) != HAL_OK)
+  /* USER CODE END I2C1_Init 1 */
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.ClockSpeed = 400000;
+  hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_16_9;
+  hi2c1.Init.OwnAddress1 = 29;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_10BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN SPI1_Init 2 */
+  /* USER CODE BEGIN I2C1_Init 2 */
 
-  /* USER CODE END SPI1_Init 2 */
-
-}
-
-/**
-  * @brief UART4 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_UART4_Init(void)
-{
-
-  /* USER CODE BEGIN UART4_Init 0 */
-
-  /* USER CODE END UART4_Init 0 */
-
-  /* USER CODE BEGIN UART4_Init 1 */
-
-  /* USER CODE END UART4_Init 1 */
-  huart4.Instance = UART4;
-  huart4.Init.BaudRate = 115200;
-  huart4.Init.WordLength = UART_WORDLENGTH_8B;
-  huart4.Init.StopBits = UART_STOPBITS_1;
-  huart4.Init.Parity = UART_PARITY_NONE;
-  huart4.Init.Mode = UART_MODE_TX_RX;
-  huart4.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart4.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart4) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN UART4_Init 2 */
-
-  /* USER CODE END UART4_Init 2 */
+  /* USER CODE END I2C1_Init 2 */
 
 }
 
@@ -305,22 +243,18 @@ static void MX_GPIO_Init(void)
 /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, GPIO_PIN_SET);
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : PE3 */
-  GPIO_InitStruct.Pin = GPIO_PIN_3;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  /*Configure GPIO pin : PA0 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PD12 PD13 PD14 PD15 */
   GPIO_InitStruct.Pin = GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15;
@@ -334,6 +268,36 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void LED_Display(uint8_t LedStatus)
+{
+  /* Turn OFF all LEDs */
+    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15, GPIO_PIN_RESET);
+
+  switch(LedStatus)
+  {
+    case (1):
+      /* Turn ON LED1 */
+        HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_SET);
+      break;
+
+    case (2):
+      /* Turn ON LED2 */
+        HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_SET);
+      break;
+
+    case (3):
+      /* Turn ON LED3 */
+        HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_SET);
+      break;
+
+    case (4):
+      /* Turn ON LED4 */
+        HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, GPIO_PIN_SET);
+      break;
+    default:
+      break;
+  }
+}
 
 /* USER CODE END 4 */
 
